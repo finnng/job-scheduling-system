@@ -4,24 +4,44 @@ import (
     "fmt"
     "github.com/lib/pq"
     _ "github.com/lib/pq"
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/push"
     . "go-pg-bench/common"
     "go-pg-bench/entity"
     "log"
+    "os"
+    "strconv"
     "time"
 )
 
 const (
-    dueJobBatchSize    = 1000
     jobCheckerLockName = 1
 )
 
+var (
+    takeOutJobDelay = prometheus.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "take_out_job_delay",
+            Help: "Total delay time from the moment job was due to the moment it was taken out",
+        },
+        []string{"count"},
+    )
+)
+
 func main() {
+    LoadEnv()
     conn := GetDBConnection()
     defer func() {
         if err := conn.Close(); err != nil {
             log.Fatal(err)
         }
     }()
+    prometheus.MustRegister(takeOutJobDelay)
+    dueJobBatchSize, err := strconv.Atoi(os.Getenv("DUE_JOB_CHECKER_BATCH_SIZE"))
+    if err != nil {
+        log.Println("Failed to parse env value to int", err)
+        dueJobBatchSize = 100000
+    }
 
     for {
         tx, err := conn.Begin()
@@ -33,7 +53,6 @@ func main() {
         if _, lockErr := tx.Exec(`SELECT PG_ADVISORY_XACT_LOCK($1)`, jobCheckerLockName); lockErr != nil {
             log.Fatal("Failed to acquire lock", lockErr)
         }
-        log.Printf("Acquired lock time %dms", time.Since(start).Milliseconds())
 
         // Select and update jobs
         updateQuery := fmt.Sprintf(`
@@ -55,7 +74,6 @@ func main() {
             }
             continue
         }
-        log.Printf("Updated jobs time %dms", time.Since(start).Milliseconds())
 
         var jobIDs []int
         for rows.Next() {
@@ -73,17 +91,28 @@ func main() {
             log.Fatal(err)
         }
 
+        processRate := float64(len(jobIDs)) / time.Now().Sub(start).Seconds()
+
+        go func(metric float64) {
+            if metric == 0 {
+                return
+            }
+            takeOutJobDelay.WithLabelValues("delayed").Set(metric)
+            if err := push.New(os.Getenv("PUSH_GATEWAY_ENDPOINT"), "track_delay_time_job").Collector(takeOutJobDelay).Push(); err != nil {
+                log.Println("Could not push completion time to Push gateway:", err)
+            }
+
+            log.Println("Processed jobs: ", len(jobIDs), "Rate: ", metric)
+        }(processRate)
+
         // Check if no jobs were updated, then exit the loop
         if len(jobIDs) == 0 {
-            log.Println("No more jobs to process")
-            time.Sleep(500 * time.Millisecond)
+            time.Sleep(100 * time.Millisecond)
         } else {
             doSomething(jobIDs)
             sendJobsNextService(jobIDs)
+            log.Printf("Processed batch of %d jobs. Total time %dms", len(jobIDs), time.Since(start).Milliseconds())
         }
-
-        // Log progress
-        log.Printf("Processed batch of %d jobs. Total time %dms", len(jobIDs), time.Since(start).Milliseconds())
     }
 }
 

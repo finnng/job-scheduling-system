@@ -1,27 +1,29 @@
-create table public.jobs
+CREATE DATABASE test
+    WITH OWNER postgres;
+CREATE TABLE jobs
 (
     id        serial
-        constraint jobs_pk
-            primary key,
-    due_at    timestamp default now() not null,
-    priority  integer   default 0,
-    tenant_id integer   default 1,
-    status    integer   default 0,
+        CONSTRAINT jobs_pk
+            PRIMARY KEY,
+    due_at    timestamp DEFAULT NOW() NOT NULL,
+    priority  integer   DEFAULT 0,
+    tenant_id integer   DEFAULT 1,
+    status    integer   DEFAULT 0,
     metadata  varchar(100)
 );
 
-alter table public.jobs
-    owner to postgres;
+ALTER TABLE jobs
+    OWNER TO postgres;
 
-create table public.processing_queue
+CREATE TABLE processing_queue
 (
-    id        integer not null,
-    due_at    timestamp default now(),
-    priority  integer   default 0,
-    tenant_id integer   default 1,
-    status    integer   default 0
+    id        integer NOT NULL,
+    due_at    timestamp DEFAULT NOW(),
+    priority  integer   DEFAULT 0,
+    tenant_id integer   DEFAULT 1,
+    status    integer   DEFAULT 0
 );
 
-alter table public.processing_queue
-    owner to postgres;
+ALTER TABLE processing_queue
+    OWNER TO postgres;
 

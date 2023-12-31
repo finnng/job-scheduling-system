@@ -11,13 +11,13 @@ import (
 )
 
 func main() {
+    LoadEnv()
     conn := GetDBConnection()
     defer func() {
         if err := conn.Close(); err != nil {
             log.Fatal(err)
         }
     }()
-    LoadEnv()
     maxTimeProcessing, err := strconv.Atoi(os.Getenv("JOB_MAXIMUM_PROCESSING_TIME_IN_SECONDS"))
     if err != nil {
         log.Fatal("Failed to parse env value to int", err)

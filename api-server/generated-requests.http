@@ -1,10 +1,10 @@
 ###
-GET http://localhost:8080/ping
+GET http://localhost:8081/ping
 
 <> 2023-12-29T184834.200.txt
 
 ### Schedule sequence type job
-POST http://localhost:8080/schedule-job
+POST http://localhost:8081/schedule-job
 Content-Type: application/json
 
 {
@@ -42,5 +42,5 @@ Content-Type: application/json
       "metadata": "job 3"
     }
   ],
-  "subscribers": 20000
+  "subscribers": 20
 }

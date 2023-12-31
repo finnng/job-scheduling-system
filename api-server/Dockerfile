@@ -1,17 +1,16 @@
 # api-server/Dockerfile
 FROM golang:1.21
 
+ENV GO111MODULE=on
 WORKDIR /app
 
-# Copy go.mod and go.sum from the project root
-COPY go.mod go.sum ./
+COPY go.mod .
+COPY go.sum .
 RUN go mod download
 
-# Copy the service's specific files
-COPY api-server/ .
+COPY . .
 
-# Build the application
-RUN go build -o ./app ./app.go
+RUN go build -o ./tmp/api-server ./api-server/app.go
 
-# Run the binary
-CMD ["./app"]
+EXPOSE 8081
+CMD ["./tmp/api-server"]

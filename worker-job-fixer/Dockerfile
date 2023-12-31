@@ -1,12 +1,14 @@
 FROM golang:1.21
 
+ENV GO111MODULE=on
 WORKDIR /app
 
-COPY go.mod go.sum ./
+COPY go.mod .
+COPY go.sum .
 RUN go mod download
 
-COPY worker-job-fixer/ .
+COPY . .
 
-RUN go build -o ./app ./app.go
+RUN go build -o ./tmp/worker-job-fixer ./worker-job-fixer/app.go
 
-CMD ["./app"]
+CMD ["./tmp/worker-job-fixer"]

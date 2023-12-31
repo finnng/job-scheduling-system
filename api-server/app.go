@@ -1,6 +1,7 @@
 package main
 
 import (
+    "database/sql"
     "encoding/json"
     "errors"
     "fmt"
@@ -11,27 +12,28 @@ import (
     "io"
     "log"
     "net/http"
+    "os"
+    "strconv"
     "strings"
     "time"
 )
 
-const (
-    insertJobBatchSize = 1000
-)
-
 var (
-    insertJobCounter = prometheus.NewCounterVec(
-        prometheus.CounterOpts{
+    insertJobCounter = prometheus.NewGaugeVec(
+        prometheus.GaugeOpts{
             Name: "inserted_jobs_total",
             Help: "Total number of jobs inserted",
         },
-        []string{"status"},
+        []string{"count"},
     )
 )
 
-var db = common.GetDBConnection()
+var db *sql.DB
 
 func main() {
+    common.LoadEnv()
+    db = common.GetDBConnection()
+
     prometheus.MustRegister(insertJobCounter)
     http.HandleFunc("/ping", pingHandler)
     http.HandleFunc("/schedule-job", scheduleJobHandler)
@@ -219,6 +221,7 @@ func getNearestWeekDay(weekdays []entity.WeekDay, now time.Time) time.Time {
 }
 
 func insertJobs(jobTemplates []entity.Job, sequence entity.Sequence) error {
+    start := time.Now()
     jobTemplateCount := len(jobTemplates)
     if jobTemplateCount == 0 || sequence.Subscribers == 0 {
         log.Println("No jobs to insert or no subscribers")
@@ -227,6 +230,11 @@ func insertJobs(jobTemplates []entity.Job, sequence entity.Sequence) error {
 
     totalJobs := jobTemplateCount * sequence.Subscribers
     log.Printf("Inserting (%d) jobTemplates * total subscribers (%d) = (%d) jobs\n", jobTemplateCount, sequence.Subscribers, totalJobs)
+
+    insertJobBatchSize, err := strconv.Atoi(os.Getenv("INSERT_JOB_BATCH_SIZE"))
+    if err != nil {
+        panic(err)
+    }
 
     for batchSizeIndex := 0; batchSizeIndex < totalJobs; batchSizeIndex += insertJobBatchSize {
         endBatchIndex := min(batchSizeIndex+insertJobBatchSize, totalJobs)
@@ -261,10 +269,13 @@ func insertJobs(jobTemplates []entity.Job, sequence entity.Sequence) error {
             log.Printf("Failed to insert batch: %v\n", err)
             return err
         }
-        insertJobCounter.WithLabelValues("inserted").Add(float64(endBatchIndex - batchSizeIndex))
+
+        insertRate := float64(endBatchIndex-batchSizeIndex) / time.Now().Sub(start).Seconds()
+        log.Println("Insert rate: ", insertRate)
+        insertJobCounter.WithLabelValues("new_inserted").Set(insertRate)
         // Push metrics to PushGateway
-        if err := push.New("http://pushgateway:9091", "track_insert_rate_job").Collector(insertJobCounter).Push(); err != nil {
-            log.Println("Could not push completion time to Pushgateway:", err)
+        if err := push.New(os.Getenv("PUSH_GATEWAY_ENDPOINT"), "track_insert_rate_job").Collector(insertJobCounter).Push(); err != nil {
+            log.Println("Could not push completion time to Push gateway:", err)
         }
     }
     return nil
