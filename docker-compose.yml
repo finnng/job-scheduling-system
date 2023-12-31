@@ -1,0 +1,67 @@
+version: '3'
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prom_data:/prometheus
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=grafana
+    volumes:
+      - ./grafana:/etc/grafana/provisioning/datasources
+
+  pushgateway:
+    image: prom/pushgateway
+    container_name: pushgateway
+    ports:
+      - "9091:9091"
+    restart: unless-stopped
+
+  api-server:
+    build:
+      context: .
+      dockerfile: ./api-server/Dockerfile
+    volumes:
+      - ./api-server:/app
+    ports:
+      - "8081:8081"
+    environment:
+      - GO_ENV=development
+
+  worker-due-job-checker:
+    build:
+      context: .
+      dockerfile: ./worker-due-job-checker/Dockerfile
+    volumes:
+      - ./worker-due-job-checker:/app
+    environment:
+      - GO_ENV=development
+    depends_on:
+      - pushgateway
+
+  worker-job-fixer:
+    build:
+      context: .
+      dockerfile: ./worker-job-fixer/Dockerfile
+    volumes:
+      - ./worker-job-fixer:/app
+    environment:
+      - GO_ENV=development
+    depends_on:
+      - pushgateway
+volumes:
+  prom_data:

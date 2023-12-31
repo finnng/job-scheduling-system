@@ -1,0 +1,46 @@
+###
+GET http://localhost:8080/ping
+
+<> 2023-12-29T184834.200.txt
+
+### Schedule sequence type job
+POST http://localhost:8080/schedule-job
+Content-Type: application/json
+
+{
+  "type": "sequence",
+  "steps": [
+    {
+      "type": "wait_certain_period",
+      "delay_period": 1,
+      "delay_unit": "minute"
+    },
+    {
+      "type": "job",
+      "metadata": "{ 'any': 'thing' }"
+    },
+    {
+      "type": "wait_weekday",
+      "weekdays": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday"
+      ]
+    },
+    {
+      "type": "job",
+      "metadata": "job 2"
+    },
+    {
+      "type": "wait_specific_date",
+      "date": "2023-12-29T18:48:34.200Z"
+    },
+    {
+      "type": "job",
+      "metadata": "job 3"
+    }
+  ],
+  "subscribers": 20000
+}
