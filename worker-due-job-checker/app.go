@@ -3,7 +3,6 @@ package main
 import (
     "context"
     "database/sql"
-    "fmt"
     "github.com/lib/pq"
     _ "github.com/lib/pq"
     "github.com/prometheus/client_golang/prometheus"
@@ -12,6 +11,7 @@ import (
     "log"
     "os"
     "os/signal"
+    "sort"
     "syscall"
     "time"
 )
@@ -58,25 +58,23 @@ func main() {
                 continue
             }
 
-            // Select and update jobs
-            updateQuery := fmt.Sprintf(`
-          UPDATE jobs 
-          SET status = %d 
-          WHERE id IN (
-              SELECT id FROM jobs 
-              WHERE due_at >= NOW() AND status = %d
-              ORDER BY priority 
-              LIMIT %d 
-              FOR UPDATE SKIP LOCKED
-          )
-          RETURNING id`, entity.JobStatusInProgress, entity.JobStatusInitialized, dueJobBatchSize)
-            rows, err := conn.Query(updateQuery)
+            rows, err := conn.Query(`
+              UPDATE jobs 
+              SET status = $1
+              WHERE id IN (
+                  SELECT id FROM jobs 
+                  WHERE due_at >= NOW() AND status = $2
+                  ORDER BY priority 
+                  LIMIT $3
+                  FOR UPDATE SKIP LOCKED
+              )
+              RETURNING id, due_at`, entity.JobStatusInProgress, entity.JobStatusInitialized, dueJobBatchSize)
             if err != nil {
                 log.Printf("Failed to update jobs: %v\n", err)
                 continue
             }
 
-            jobIDs := extractJobIds(rows)
+            jobs := extractJobs(rows)
 
             // Release lock
             if _, lockErr := conn.Exec(`SELECT PG_ADVISORY_UNLOCK($1)`, GetEnvInt("JOB_CHECKER_LOCK_KEY", 1)); lockErr != nil {
@@ -84,54 +82,85 @@ func main() {
                 continue
             }
 
-            postProcessJobs(jobIDs, start)
+            sendJobsNextService(jobs)
+            collectMetrics(jobs, start)
         }
     }
 }
 
-func postProcessJobs(jobIDs []int, start time.Time) {
-    processRate := float64(len(jobIDs)) / time.Now().Sub(start).Seconds()
-    CollectMetric(collector, "processed_job_per_second", processRate)
-
-    if len(jobIDs) > 0 {
-        doSomething(jobIDs)
-        sendJobsNextService(jobIDs)
-        log.Printf("Processed batch of %d jobs. Total time %dms", len(jobIDs), time.Since(start).Milliseconds())
-
-        // track average processing time
-        avgProcessingTime := (int64)(len(jobIDs)) / time.Since(start).Milliseconds()
-        CollectMetric(collector, "average_delay", (float64)(avgProcessingTime))
+func collectMetrics(jobs []entity.Job, start time.Time) {
+    if len(jobs) == 0 {
+        return
     }
+    processRate := float64(len(jobs)) / time.Now().Sub(start).Seconds()
+    CollectMetric(collector, "job_throughput_per_sec", processRate)
+
+    log.Printf("Processed batch of %d jobs. Total time %dms", len(jobs), time.Since(start).Milliseconds())
+
+    p95 := calculateP95(jobs)
+    CollectMetric(collector, "job_post_process_p95", p95)
 }
 
-func extractJobIds(rows *sql.Rows) []int {
-    var jobIDs []int
+func calculateP95(jobs []entity.Job) float64 {
+    if len(jobs) == 0 {
+        // No jobs, so percentile is undefined. Handle as needed.
+        return -1 // or math.NaN()
+    }
+
+    var delays []float64
+    utcNow := GetCurrentUtcTime() // return time.Now in UTC
+    for _, job := range jobs {
+        delay := utcNow.Sub(job.DueAt).Milliseconds()
+        delays = append(delays, float64(delay))
+    }
+    // We may need to store the delays for later use, so we'll return them
+
+    if len(delays) == 1 {
+        // Only one job, so its delay is the p95
+        return delays[0]
+    }
+
+    sort.Float64s(delays)
+
+    p95Index := int(float64(len(delays)) * 0.95)
+    if p95Index >= len(delays) {
+        p95Index = len(delays) - 1
+    }
+    return delays[p95Index]
+}
+
+func extractJobs(rows *sql.Rows) []entity.Job {
+    var jobs []entity.Job
     for rows.Next() {
         var id int
-        if rsError := rows.Scan(&id); rsError != nil {
+        var dueAt time.Time
+        if rsError := rows.Scan(&id, &dueAt); rsError != nil {
             log.Fatalf("Error scanning row: %v", rsError)
         }
-        jobIDs = append(jobIDs, id)
+        job := entity.Job{
+            Id:    id,
+            DueAt: dueAt,
+        }
+        jobs = append(jobs, job)
     }
     if rCError := rows.Close(); rCError != nil {
         log.Fatal(rCError)
     }
-    return jobIDs
+    return jobs
 }
 
-func doSomething(jobIDs []int) {
-    // log.Println("Preparing context data")
-}
-
-func sendJobsNextService(jobIDs []int) {
+func sendJobsNextService(jobs []entity.Job) {
+    if len(jobs) == 0 {
+        return
+    }
     var completedJobs, failedJobs []int
 
-    for _, jobId := range jobIDs {
-        err := sendMessageToQueue(jobId)
+    for _, job := range jobs {
+        err := sendMessageToQueue(job.Id)
         if err != nil {
-            failedJobs = append(failedJobs, jobId)
+            failedJobs = append(failedJobs, job.Id)
         } else {
-            completedJobs = append(completedJobs, jobId)
+            completedJobs = append(completedJobs, job.Id)
         }
     }
 
@@ -150,6 +179,8 @@ func sendJobsNextService(jobIDs []int) {
             log.Printf("Failed to update failed jobs: %v", err)
         }
     }
+    // track error rate
+    CollectMetric(collector, "job_post_process_error_rate", (float64)(len(failedJobs)/len(jobs)))
 }
 
 func updateJobStatuses(jobIDs []int, status entity.JobStatus) error {

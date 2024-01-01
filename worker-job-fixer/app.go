@@ -30,6 +30,7 @@ func main() {
         log.Println("Deleted jobs: ", deleted, err)
 
         // Select job exceeding processing time limit and update them to Initialized status to get  reprocessed
+        // NOW() is at utc already
         updRes, err := conn.Exec(`
           UPDATE jobs 
           SET status = $1, 
