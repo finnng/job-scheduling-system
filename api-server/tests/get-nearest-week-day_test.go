@@ -1,6 +1,7 @@
-package main
+package tests
 
 import (
+    "go-pg-bench/api-server/controllers"
     "go-pg-bench/entity"
     "testing"
     "time"
@@ -56,7 +57,7 @@ func TestGetNearestWeekDay(t *testing.T) {
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            got := getNearestWeekDay(tt.weekdays, tt.now)
+            got := controllers.GetNearestWeekDay(tt.weekdays, tt.now)
             if !got.Equal(tt.expectedDate) {
                 t.Errorf("getNearestWeekDay() got %v, want %v", got, tt.expectedDate)
             }

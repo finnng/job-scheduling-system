@@ -1,6 +1,7 @@
-package main
+package tests
 
 import (
+    "go-pg-bench/api-server/controllers"
     "go-pg-bench/entity"
     "log"
     "testing"
@@ -31,9 +32,9 @@ func TestCalculateNextJobs(t *testing.T) {
         time.Date(2023, 12, 29, 18, 48, 34, 200000000, time.UTC), // Specific date for Job 3
     }
 
-    got, err := calculateNextJobs(sequence, startedAt)
+    got, err := controllers.CalculateNextJobs(sequence, startedAt)
     if err != nil {
-        t.Fatalf("calculateNextJobs() error = %v", err)
+        t.Fatalf("CalculateNextJobs() error = %v", err)
     }
 
     if len(got) != len(expectedDates) {

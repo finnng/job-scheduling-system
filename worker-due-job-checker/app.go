@@ -5,7 +5,6 @@ import (
     "github.com/lib/pq"
     _ "github.com/lib/pq"
     "github.com/prometheus/client_golang/prometheus"
-    "github.com/prometheus/client_golang/prometheus/push"
     . "go-pg-bench/common"
     "go-pg-bench/entity"
     "log"
@@ -19,9 +18,9 @@ const (
 )
 
 var (
-    takeOutJobDelay = prometheus.NewGaugeVec(
+    collector = prometheus.NewGaugeVec(
         prometheus.GaugeOpts{
-            Name: "take_out_job_delay",
+            Name: "due_job_checker_metric_collector",
             Help: "Total delay time from the moment job was due to the moment it was taken out",
         },
         []string{"count"},
@@ -36,7 +35,7 @@ func main() {
             log.Fatal(err)
         }
     }()
-    prometheus.MustRegister(takeOutJobDelay)
+    prometheus.MustRegister(collector)
     dueJobBatchSize, err := strconv.Atoi(os.Getenv("DUE_JOB_CHECKER_BATCH_SIZE"))
     if err != nil {
         log.Println("Failed to parse env value to int", err)
@@ -44,12 +43,12 @@ func main() {
     }
 
     for {
+        start := time.Now()
         tx, err := conn.Begin()
         if err != nil {
             log.Fatal(err)
         }
 
-        start := time.Now()
         if _, lockErr := tx.Exec(`SELECT PG_ADVISORY_XACT_LOCK($1)`, jobCheckerLockName); lockErr != nil {
             log.Fatal("Failed to acquire lock", lockErr)
         }
@@ -92,26 +91,17 @@ func main() {
         }
 
         processRate := float64(len(jobIDs)) / time.Now().Sub(start).Seconds()
-
-        go func(metric float64) {
-            if metric == 0 {
-                return
-            }
-            takeOutJobDelay.WithLabelValues("delayed").Set(metric)
-            if err := push.New(os.Getenv("PUSH_GATEWAY_ENDPOINT"), "track_delay_time_job").Collector(takeOutJobDelay).Push(); err != nil {
-                log.Println("Could not push completion time to Push gateway:", err)
-            }
-
-            log.Println("Processed jobs: ", len(jobIDs), "Rate: ", metric)
-        }(processRate)
+        CollectMetric(collector, "processed_job_per_second", processRate)
 
         // Check if no jobs were updated, then exit the loop
-        if len(jobIDs) == 0 {
-            time.Sleep(100 * time.Millisecond)
-        } else {
+        if len(jobIDs) > 0 {
             doSomething(jobIDs)
             sendJobsNextService(jobIDs)
             log.Printf("Processed batch of %d jobs. Total time %dms", len(jobIDs), time.Since(start).Milliseconds())
+
+            // track average processing time
+            avgProcessingTime := (int64)(len(jobIDs)) / time.Since(start).Milliseconds()
+            CollectMetric(collector, "average_delay", (float64)(avgProcessingTime))
         }
     }
 }
