@@ -5,6 +5,7 @@ import (
     "log"
     "os"
     "regexp"
+    "strconv"
     "sync"
 )
 
@@ -26,4 +27,18 @@ func LoadEnv() {
             log.Fatal("Failed to get .env file", err)
         }
     })
+}
+
+func GetEnvInt(key string, fallback int) int {
+    LoadEnv()
+    val := os.Getenv(key)
+    if val == "" {
+        return fallback
+    }
+    intVal, err := strconv.Atoi(val)
+    if err != nil {
+        log.Print("Failed to parse env value to int", err)
+        return fallback
+    }
+    return intVal
 }

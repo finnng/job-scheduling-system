@@ -28,21 +28,27 @@ var db *sql.DB
 func main() {
     common.LoadEnv()
     db = common.GetDBConnection()
-
-    prometheus.MustRegister(collector)
-    http.HandleFunc("/ping", pingHandler)
-    http.HandleFunc("/schedule-job", scheduleJobHandler)
-
-    fmt.Println("Starting server at port 8081")
-    if err := http.ListenAndServe(":8081", nil); err != nil {
-        log.Fatal(err)
-    }
-
     defer func() {
         if err := db.Close(); err != nil {
             log.Fatal(err)
         }
     }()
+
+    prometheus.MustRegister(collector)
+    http.HandleFunc("/ping", pingHandler)
+    http.HandleFunc("/schedule-job", scheduleJobHandler)
+
+    // go func() {
+    //     if err := controllers.ReportJobStatus(db, collector); err != nil {
+    //         log.Print(err)
+    //     }
+    //     time.Sleep(7 * time.Second)
+    // }()
+
+    fmt.Println("Starting server at port 8081")
+    if err := http.ListenAndServe(":8081", nil); err != nil {
+        log.Fatal(err)
+    }
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {

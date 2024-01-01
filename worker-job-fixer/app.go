@@ -5,8 +5,6 @@ import (
     . "go-pg-bench/common"
     "go-pg-bench/entity"
     "log"
-    "os"
-    "strconv"
     "time"
 )
 
@@ -18,10 +16,7 @@ func main() {
             log.Fatal(err)
         }
     }()
-    maxTimeProcessing, err := strconv.Atoi(os.Getenv("JOB_MAXIMUM_PROCESSING_TIME_IN_SECONDS"))
-    if err != nil {
-        log.Fatal("Failed to parse env value to int", err)
-    }
+    maxTimeProcessing := GetEnvInt("JOB_MAXIMUM_PROCESSING_TIME_IN_SECONDS", 15)
 
     for {
         // DELETE completed jobs

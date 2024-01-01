@@ -1,6 +1,8 @@
 package main
 
 import (
+    "context"
+    "database/sql"
     "fmt"
     "github.com/lib/pq"
     _ "github.com/lib/pq"
@@ -9,12 +11,9 @@ import (
     "go-pg-bench/entity"
     "log"
     "os"
-    "strconv"
+    "os/signal"
+    "syscall"
     "time"
-)
-
-const (
-    jobCheckerLockName = 1
 )
 
 var (
@@ -30,31 +29,37 @@ var (
 func main() {
     LoadEnv()
     conn := GetDBConnection()
-    defer func() {
-        if err := conn.Close(); err != nil {
-            log.Fatal(err)
-        }
-    }()
+    defer conn.Close()
+
     prometheus.MustRegister(collector)
-    dueJobBatchSize, err := strconv.Atoi(os.Getenv("DUE_JOB_CHECKER_BATCH_SIZE"))
-    if err != nil {
-        log.Println("Failed to parse env value to int", err)
-        dueJobBatchSize = 100000
-    }
+    dueJobBatchSize := GetEnvInt("DUE_JOB_CHECKER_BATCH_SIZE", 1000)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    sigs := make(chan os.Signal, 1)
+    signal.Notify(sigs, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+    go func() {
+        <-sigs
+        log.Println("Gracefully shutting down...")
+        cancel()
+    }()
 
     for {
-        start := time.Now()
-        tx, err := conn.Begin()
-        if err != nil {
-            log.Fatal(err)
-        }
+        select {
+        case <-ctx.Done():
+            log.Println("Shutting down...")
+            return
+        default:
+            start := time.Now()
 
-        if _, lockErr := tx.Exec(`SELECT PG_ADVISORY_XACT_LOCK($1)`, jobCheckerLockName); lockErr != nil {
-            log.Fatal("Failed to acquire lock", lockErr)
-        }
+            if _, lockErr := conn.Exec(`SELECT PG_ADVISORY_LOCK($1)`, GetEnvInt("JOB_CHECKER_LOCK_KEY", 1)); lockErr != nil {
+                log.Println("Failed to acquire lock", lockErr)
+                continue
+            }
 
-        // Select and update jobs
-        updateQuery := fmt.Sprintf(`
+            // Select and update jobs
+            updateQuery := fmt.Sprintf(`
           UPDATE jobs 
           SET status = %d 
           WHERE id IN (
@@ -65,45 +70,53 @@ func main() {
               FOR UPDATE SKIP LOCKED
           )
           RETURNING id`, entity.JobStatusInProgress, entity.JobStatusInitialized, dueJobBatchSize)
-        rows, err := tx.Query(updateQuery)
-        if err != nil {
-            log.Printf("Failed to update jobs: %v\n", err)
-            if rbErr := tx.Rollback(); rbErr != nil {
-                log.Fatal("Failed to roll back", rbErr)
+            rows, err := conn.Query(updateQuery)
+            if err != nil {
+                log.Printf("Failed to update jobs: %v\n", err)
+                continue
             }
-            continue
-        }
 
-        var jobIDs []int
-        for rows.Next() {
-            var id int
-            if rsError := rows.Scan(&id); rsError != nil {
-                log.Fatalf("Error scanning row: %v", rsError)
+            jobIDs := extractJobIds(rows)
+
+            // Release lock
+            if _, lockErr := conn.Exec(`SELECT PG_ADVISORY_UNLOCK($1)`, GetEnvInt("JOB_CHECKER_LOCK_KEY", 1)); lockErr != nil {
+                log.Println("Failed to release lock", lockErr)
+                continue
             }
-            jobIDs = append(jobIDs, id)
-        }
-        if rCError := rows.Close(); rCError != nil {
-            log.Fatal(rCError)
-        }
 
-        if commitErr := tx.Commit(); commitErr != nil {
-            log.Fatal(err)
-        }
-
-        processRate := float64(len(jobIDs)) / time.Now().Sub(start).Seconds()
-        CollectMetric(collector, "processed_job_per_second", processRate)
-
-        // Check if no jobs were updated, then exit the loop
-        if len(jobIDs) > 0 {
-            doSomething(jobIDs)
-            sendJobsNextService(jobIDs)
-            log.Printf("Processed batch of %d jobs. Total time %dms", len(jobIDs), time.Since(start).Milliseconds())
-
-            // track average processing time
-            avgProcessingTime := (int64)(len(jobIDs)) / time.Since(start).Milliseconds()
-            CollectMetric(collector, "average_delay", (float64)(avgProcessingTime))
+            postProcessJobs(jobIDs, start)
         }
     }
+}
+
+func postProcessJobs(jobIDs []int, start time.Time) {
+    processRate := float64(len(jobIDs)) / time.Now().Sub(start).Seconds()
+    CollectMetric(collector, "processed_job_per_second", processRate)
+
+    if len(jobIDs) > 0 {
+        doSomething(jobIDs)
+        sendJobsNextService(jobIDs)
+        log.Printf("Processed batch of %d jobs. Total time %dms", len(jobIDs), time.Since(start).Milliseconds())
+
+        // track average processing time
+        avgProcessingTime := (int64)(len(jobIDs)) / time.Since(start).Milliseconds()
+        CollectMetric(collector, "average_delay", (float64)(avgProcessingTime))
+    }
+}
+
+func extractJobIds(rows *sql.Rows) []int {
+    var jobIDs []int
+    for rows.Next() {
+        var id int
+        if rsError := rows.Scan(&id); rsError != nil {
+            log.Fatalf("Error scanning row: %v", rsError)
+        }
+        jobIDs = append(jobIDs, id)
+    }
+    if rCError := rows.Close(); rCError != nil {
+        log.Fatal(rCError)
+    }
+    return jobIDs
 }
 
 func doSomething(jobIDs []int) {
