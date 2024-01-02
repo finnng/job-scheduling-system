@@ -9,14 +9,16 @@ import (
     "time"
 )
 
-type Job struct {
-    Type     string `json:"type"`
-    Metadata string `json:"metadata"`
+type Step struct {
+    Type        string `json:"type"`
+    Metadata    string `json:"metadata"`
+    DelayPeriod int    `json:"delay_period"`
+    DelayUnit   string `json:"delay_unit"`
 }
 
 type Payload struct {
     Type        string `json:"type"`
-    Steps       []Job  `json:"steps"`
+    Steps       []Step `json:"steps"`
     Subscribers int    `json:"subscribers"`
 }
 
@@ -28,10 +30,15 @@ func sendRequest() {
         // Create random payload
         payload := Payload{
             Type: "sequence",
-            Steps: []Job{
+            Steps: []Step{
                 {
                     Type:     "job",
                     Metadata: "{ 'any': 'thing 1' }",
+                },
+                {
+                    Type:        "wait_certain_period",
+                    DelayPeriod: 1,
+                    DelayUnit:   "minute",
                 },
                 {
                     Type:     "job",

@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     "go-pg-bench/entity"
+    "math/rand"
     "time"
 )
 
@@ -37,13 +38,20 @@ func CalculateNextJobs(sequence entity.Sequence, startedAt time.Time) ([]entity.
                 DueAt:    startedAt,
                 Status:   entity.JobStatusInitialized,
                 Metadata: s.Metadata,
-                Priority: 1, // TODO: calculate priority
-                TenantId: 1, // TODO: calculate tenant id
+                Priority: 0, // getPriority(), // TODO: calculate priority
+                TenantId: 1, // TODO: join tenant id
             }
             jobs = append(jobs, job)
         }
     }
     return jobs, nil
+}
+
+// getPriority returns a random number between 1 and 3
+// Assume we are getting this number from tenant type, 0 = new_tenants, 1 = sme, 2 = enterprise
+// The priority will be managed by other service
+func getPriority() int {
+    return rand.Intn(3) + 1
 }
 
 func GetNearestWeekDay(weekdays []entity.WeekDay, now time.Time) time.Time {

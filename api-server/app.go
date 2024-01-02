@@ -10,6 +10,7 @@ import (
     "io"
     "log"
     "net/http"
+    "time"
 )
 
 var (
@@ -78,7 +79,7 @@ func scheduleJobHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    jobs, err := controllers.CalculateNextJobs(*sequence, common.GetCurrentUtcTime())
+    jobs, err := controllers.CalculateNextJobs(*sequence, time.Now().UTC())
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return

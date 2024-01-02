@@ -63,7 +63,7 @@ func main() {
               SET status = $1
               WHERE id IN (
                   SELECT id FROM jobs 
-                  WHERE due_at >= NOW() AND status = $2
+                  WHERE due_at <= NOW() AND status = $2
                   ORDER BY priority 
                   LIMIT $3
                   FOR UPDATE SKIP LOCKED
@@ -108,7 +108,7 @@ func calculateP95(jobs []entity.Job) float64 {
     }
 
     var delays []float64
-    utcNow := GetCurrentUtcTime() // return time.Now in UTC
+    utcNow := time.Now().UTC()
     for _, job := range jobs {
         delay := utcNow.Sub(job.DueAt).Milliseconds()
         delays = append(delays, float64(delay))

@@ -1,6 +1,4 @@
-CREATE DATABASE test
-    WITH OWNER postgres;
-CREATE TABLE jobs
+CREATE TABLE IF NOT EXISTS public.jobs
 (
     id        serial
         CONSTRAINT jobs_pk
@@ -12,18 +10,15 @@ CREATE TABLE jobs
     metadata  varchar(100)
 );
 
-ALTER TABLE jobs
+ALTER TABLE public.jobs
     OWNER TO postgres;
 
-CREATE TABLE processing_queue
-(
-    id        integer NOT NULL,
-    due_at    timestamp DEFAULT NOW(),
-    priority  integer   DEFAULT 0,
-    tenant_id integer   DEFAULT 1,
-    status    integer   DEFAULT 0
-);
+CREATE INDEX IF NOT EXISTS jobs_due_at_index
+    ON public.jobs (due_at);
 
-ALTER TABLE processing_queue
-    OWNER TO postgres;
+CREATE INDEX IF NOT EXISTS jobs_priority_index
+    ON public.jobs (priority);
+
+CREATE INDEX IF NOT EXISTS jobs_status_index
+    ON public.jobs (status);
 

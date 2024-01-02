@@ -1,6 +1,7 @@
 package main
 
 import (
+    "fmt"
     _ "github.com/lib/pq"
     . "go-pg-bench/common"
     "go-pg-bench/entity"
@@ -16,7 +17,8 @@ func main() {
             log.Fatal(err)
         }
     }()
-    maxTimeProcessing := GetEnvInt("JOB_MAXIMUM_PROCESSING_TIME_IN_SECONDS", 15)
+    m := GetEnvInt("JOB_MAXIMUM_PROCESSING_TIME_IN_SECONDS", 15)
+    maxTimeProcessing := fmt.Sprintf("%d seconds", m)
 
     for {
         // DELETE completed jobs
@@ -31,18 +33,21 @@ func main() {
 
         // Select job exceeding processing time limit and update them to Initialized status to get  reprocessed
         // NOW() is at utc already
-        updRes, err := conn.Exec(`
+        query := fmt.Sprintf(`
           UPDATE jobs 
           SET status = $1, 
               due_at = NOW()
           WHERE id IN (
               SELECT id FROM jobs
-              WHERE (status = $2 OR status = $3) 
-                    AND NOW() - jobs.due_at > INTERVAL '1 second' * $4)`,
+              WHERE (status = $2 AND NOW() - jobs.due_at > INTERVAL '%s') 
+                OR status = $3
+          )`, maxTimeProcessing) // Use string formatting to include the interval in the query
+
+        updRes, err := conn.Exec(query,
             entity.JobStatusInitialized,
             entity.JobStatusInProgress,
             entity.JobStatusFailed,
-            maxTimeProcessing)
+        )
         if err != nil {
             log.Fatal("Failed to update jobs", err)
         }
@@ -50,7 +55,7 @@ func main() {
         updated, err := updRes.RowsAffected()
         log.Println("Updated jobs: ", updated, err)
 
-        log.Printf("Sleeping... for %d seconds\n", maxTimeProcessing)
-        time.Sleep(time.Duration(maxTimeProcessing) * time.Second)
+        log.Printf("Sleeping... for %s seconds\n", maxTimeProcessing)
+        time.Sleep(time.Duration(m) * time.Second)
     }
 }
