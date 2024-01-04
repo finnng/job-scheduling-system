@@ -1,7 +1,3 @@
-### Repository
-
-- https://github.com/finnng/go-pg-bench
-
 ### Prerequisites
 
 - Go version 1.21.0
@@ -11,7 +7,7 @@
 
 1. Pull the source code
 2. Start the databases: `docker compose up -d`
-3. Create a Postgres test database. Use any database client to create a database name `test` and grant permission for
+3. Create a Postgre test database. Use any database client to create a database name `test` and grant permission for
    the default user `postgres` on it.
 
 ```sql
